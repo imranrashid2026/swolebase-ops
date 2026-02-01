@@ -54,7 +54,7 @@ export function useCreateOrganization() {
       return data as Organization;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['organizations'] });
+      queryClient.invalidateQueries({ queryKey: ['organizations', user?.id] });
     },
   });
 }
