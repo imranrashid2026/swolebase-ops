@@ -1,31 +1,21 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
-import { useOrganizations, useCreateOrganization } from '@/hooks/useOrganizations';
+import { useOrganizations } from '@/hooks/useOrganizations';
 import { useCreateProject } from '@/hooks/useProjects';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Loader2, ArrowLeft, Plus, Building2 } from 'lucide-react';
+import { Loader2, ArrowLeft, Building2 } from 'lucide-react';
 import { toast } from 'sonner';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
 
 const projectSchema = z.object({
-  organization_id: z.string().min(1, 'Please select an organization'),
   name: z.string().min(2, 'Name must be at least 2 characters').max(100),
   slug: z.string()
     .min(2, 'Slug must be at least 2 characters')
@@ -37,31 +27,19 @@ const projectSchema = z.object({
   supabase_service_key: z.string().optional(),
 });
 
-const orgSchema = z.object({
-  name: z.string().min(2, 'Name must be at least 2 characters').max(100),
-  slug: z.string()
-    .min(2, 'Slug must be at least 2 characters')
-    .max(50)
-    .regex(/^[a-z0-9-]+$/, 'Slug can only contain lowercase letters, numbers, and hyphens'),
-});
-
 type ProjectFormData = z.infer<typeof projectSchema>;
-type OrgFormData = z.infer<typeof orgSchema>;
 
 export default function NewProject() {
   const navigate = useNavigate();
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [orgDialogOpen, setOrgDialogOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const { data: organizations, isLoading: orgsLoading } = useOrganizations();
   const createProject = useCreateProject();
-  const createOrg = useCreateOrganization();
 
   const form = useForm<ProjectFormData>({
     resolver: zodResolver(projectSchema),
     defaultValues: {
-      organization_id: '',
       name: '',
       slug: '',
       description: '',
@@ -71,13 +49,7 @@ export default function NewProject() {
     },
   });
 
-  const orgForm = useForm<OrgFormData>({
-    resolver: zodResolver(orgSchema),
-    defaultValues: { name: '', slug: '' },
-  });
-
   // Auto-generate slug from name
-  const watchName = form.watch('name');
   const handleNameChange = (value: string) => {
     const slug = value
       .toLowerCase()
@@ -88,12 +60,19 @@ export default function NewProject() {
   };
 
   async function onSubmit(data: ProjectFormData) {
+    // Get the user's default organization
+    const defaultOrg = organizations?.[0];
+    if (!defaultOrg) {
+      setError('No organization found. Please try signing out and back in.');
+      return;
+    }
+
     setIsSubmitting(true);
     setError(null);
 
     try {
       const project = await createProject.mutateAsync({
-        organization_id: data.organization_id,
+        organization_id: defaultOrg.id,
         name: data.name,
         slug: data.slug,
         description: data.description || undefined,
@@ -106,7 +85,7 @@ export default function NewProject() {
       navigate(`/dashboard/projects/${project.id}`);
     } catch (err: any) {
       if (err.message?.includes('duplicate')) {
-        setError('A project with this slug already exists in the organization.');
+        setError('A project with this slug already exists.');
       } else {
         setError(err.message || 'Failed to create project');
       }
@@ -115,19 +94,14 @@ export default function NewProject() {
     }
   }
 
-  async function onCreateOrg(data: OrgFormData) {
-    try {
-      const org = await createOrg.mutateAsync({
-        name: data.name,
-        slug: data.slug,
-      });
-      form.setValue('organization_id', org.id);
-      setOrgDialogOpen(false);
-      orgForm.reset();
-      toast.success('Organization created!');
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to create organization');
-    }
+  if (orgsLoading) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center min-h-[400px]">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        </div>
+      </DashboardLayout>
+    );
   }
 
   return (
@@ -158,87 +132,6 @@ export default function NewProject() {
 
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-                {/* Organization */}
-                <FormField
-                  control={form.control}
-                  name="organization_id"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Organization</FormLabel>
-                      <div className="flex gap-2">
-                        <Select
-                          onValueChange={field.onChange}
-                          value={field.value}
-                          disabled={orgsLoading}
-                        >
-                          <FormControl>
-                            <SelectTrigger className="flex-1">
-                              <SelectValue placeholder="Select an organization" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {organizations?.map((org) => (
-                              <SelectItem key={org.id} value={org.id}>
-                                {org.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <Dialog open={orgDialogOpen} onOpenChange={setOrgDialogOpen}>
-                          <DialogTrigger asChild>
-                            <Button type="button" variant="outline">
-                              <Plus className="w-4 h-4" />
-                            </Button>
-                          </DialogTrigger>
-                          <DialogContent>
-                            <DialogHeader>
-                              <DialogTitle>Create Organization</DialogTitle>
-                              <DialogDescription>
-                                Organizations help you group related projects together
-                              </DialogDescription>
-                            </DialogHeader>
-                            <Form {...orgForm}>
-                              <form onSubmit={orgForm.handleSubmit(onCreateOrg)} className="space-y-4">
-                                <FormField
-                                  control={orgForm.control}
-                                  name="name"
-                                  render={({ field }) => (
-                                    <FormItem>
-                                      <FormLabel>Name</FormLabel>
-                                      <FormControl>
-                                        <Input {...field} placeholder="My Company" />
-                                      </FormControl>
-                                      <FormMessage />
-                                    </FormItem>
-                                  )}
-                                />
-                                <FormField
-                                  control={orgForm.control}
-                                  name="slug"
-                                  render={({ field }) => (
-                                    <FormItem>
-                                      <FormLabel>Slug</FormLabel>
-                                      <FormControl>
-                                        <Input {...field} placeholder="my-company" />
-                                      </FormControl>
-                                      <FormMessage />
-                                    </FormItem>
-                                  )}
-                                />
-                                <Button type="submit" className="w-full" disabled={createOrg.isPending}>
-                                  {createOrg.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                                  Create Organization
-                                </Button>
-                              </form>
-                            </Form>
-                          </DialogContent>
-                        </Dialog>
-                      </div>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
                 {/* Project Name */}
                 <FormField
                   control={form.control}
